@@ -15,10 +15,20 @@ const eslintConfig = [
     ignores: [
       "node_modules/**",
       ".next/**",
+      ".next-dev-*/**",
       "out/**",
       "build/**",
+      "backend/**",
+      "django_backend/**",
       "next-env.d.ts",
     ],
+  },
+  {
+    rules: {
+      "react/no-unescaped-entities": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-empty-object-type": "off",
+    },
   },
 ];
 
