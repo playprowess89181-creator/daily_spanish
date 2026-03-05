@@ -1,0 +1,60 @@
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+import '@fortawesome/fontawesome-free/css/all.min.css';
+import { AuthProvider } from "../lib/AuthContext";
+import { CartProvider } from "../lib/CartContext";
+import SupportChatWidget from "./components/SupportChatWidget";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: {
+    default: "Daily Spanish",
+    template: "%s | Daily Spanish",
+  },
+  description: "Learn Spanish daily with lessons, exercises, and practice.",
+  icons: {
+    icon: [
+      { url: "/icon", type: "image/png" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    apple: [{ url: "/apple-icon", type: "image/png" }],
+    shortcut: ["/icon"],
+  },
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <meta
+          httpEquiv="Content-Security-Policy"
+          content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com blob:; script-src-elem 'self' 'unsafe-inline' https://js.stripe.com blob:; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob: data: http://localhost:8000 http://127.0.0.1:8000; worker-src 'self' blob:; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000 https://jsonplaceholder.typicode.com ws: https://api.stripe.com https://m.stripe.network https://r.stripe.com; frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com;"
+        />
+      </head>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+       suppressHydrationWarning>
+        <AuthProvider>
+          <CartProvider>
+            {children}
+            <SupportChatWidget />
+          </CartProvider>
+        </AuthProvider>
+      </body>
+    </html>
+  );
+}
