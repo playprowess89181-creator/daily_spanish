@@ -22,4 +22,5 @@ urlpatterns = [
     path('users/', views.list_users, name='list_users'),
     path('users/<str:user_id>/', views.user_detail, name='user_detail'),
     path('dashboard/', views.dashboard_stats, name='dashboard_stats'),
+    path('reports/', views.reports_analytics, name='reports_analytics'),
 ]

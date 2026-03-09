@@ -1,56 +1,58 @@
 'use client';
 
-export default function ReportStatsCards() {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <div className="flex items-center">
-          <div className="p-3 rounded-full bg-blue-600 bg-opacity-10">
-            <i className="fas fa-globe text-blue-600 text-xl"></i>
-          </div>
-          <div className="ml-4">
-            <p className="text-sm font-medium text-gray-600">Total Countries</p>
-            <p className="text-2xl font-semibold text-gray-900">45</p>
-          </div>
-        </div>
-      </div>
+import type { ReportsAnalytics } from '../page';
 
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <div className="flex items-center">
-          <div className="p-3 rounded-full bg-yellow-500 bg-opacity-10">
-            <i className="fas fa-language text-yellow-500 text-xl"></i>
-          </div>
-          <div className="ml-4">
-            <p className="text-sm font-medium text-gray-600">Languages</p>
-            <p className="text-2xl font-semibold text-gray-900">12</p>
-          </div>
-        </div>
-      </div>
+export default function ReportStatsCards(props: { data: ReportsAnalytics | null; loading: boolean }) {
+  const { data, loading } = props;
+  const v = data?.users;
+  const l = data?.lessons;
+  const s = data?.support;
 
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <div className="flex items-center">
-          <div className="p-3 rounded-full bg-orange-500 bg-opacity-10">
-            <i className="fas fa-dollar-sign text-orange-500 text-xl"></i>
-          </div>
-          <div className="ml-4">
-            <p className="text-sm font-medium text-gray-600">Total Revenue</p>
-            <p className="text-2xl font-semibold text-gray-900">$125,430</p>
-          </div>
+  const card = (opts: { title: string; value: string; icon: string; accent: string; sub?: string }) => (
+    <div className="glass-effect rounded-2xl border border-white/20 p-6 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm text-gray-600">{opts.title}</div>
+          <div className="text-2xl font-extrabold text-gray-900 mt-1">{loading ? '—' : opts.value}</div>
+          {opts.sub ? <div className="text-xs text-gray-500 mt-1">{opts.sub}</div> : null}
         </div>
-      </div>
-
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <div className="flex items-center">
-          <div className="p-3 rounded-full bg-green-400 bg-opacity-10">
-            <i className="fas fa-chart-line text-green-400 text-xl"></i>
-          </div>
-          <div className="ml-4">
-            <p className="text-sm font-medium text-gray-600">Growth Rate</p>
-            <p className="text-2xl font-semibold text-gray-900">+23.5%</p>
-          </div>
+        <div className={`h-12 w-12 rounded-2xl flex items-center justify-center ${opts.accent}`}>
+          <i className={`${opts.icon} text-white text-lg`}></i>
         </div>
       </div>
     </div>
   );
-}
 
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      {card({
+        title: 'Total Users',
+        value: String(v?.total ?? 0),
+        icon: 'fas fa-users',
+        accent: 'bg-gradient-to-br from-blue-600 to-indigo-600',
+        sub: v ? `${v.active.toLocaleString()} active • ${v.blocked.toLocaleString()} blocked` : undefined,
+      })}
+      {card({
+        title: 'Countries / Languages',
+        value: v ? `${v.countries_count}/${v.languages_count}` : '0/0',
+        icon: 'fas fa-globe',
+        accent: 'bg-gradient-to-br from-emerald-500 to-teal-600',
+        sub: v ? `${v.verified.toLocaleString()} verified • ${v.subscribed.toLocaleString()} subscribed` : undefined,
+      })}
+      {card({
+        title: 'Lessons',
+        value: String(l?.total ?? 0),
+        icon: 'fas fa-book',
+        accent: 'bg-gradient-to-br from-orange-500 to-rose-500',
+        sub: l ? `${l.with_video_file + l.with_video_url} with video • ${l.with_lesson_pdf + l.with_keys_pdf} PDFs` : undefined,
+      })}
+      {card({
+        title: 'Support Threads',
+        value: String(s?.total ?? 0),
+        icon: 'fas fa-life-ring',
+        accent: 'bg-gradient-to-br from-purple-600 to-fuchsia-600',
+        sub: s ? `${s.open.toLocaleString()} open • ${s.resolved.toLocaleString()} resolved` : undefined,
+      })}
+    </div>
+  );
+}

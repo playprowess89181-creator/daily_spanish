@@ -12,6 +12,8 @@ import random
 import logging
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
+from django.db.models import Count
+from django.db.models.functions import TruncDate
 
 from .models import User, PendingUser, EmailVerification, SubscriptionOnboarding
 from lessons.models import Lesson
@@ -934,4 +936,151 @@ def dashboard_stats(request):
             'support_resolved': resolved_threads,
         }, status=status.HTTP_200_OK)
     except Exception:
+        return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def reports_analytics(request):
+    try:
+        if not request.user.is_staff:
+            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+        days_raw = request.query_params.get('days') or '30'
+        try:
+            days = int(days_raw)
+        except Exception:
+            days = 30
+        if days < 7:
+            days = 7
+        if days > 365:
+            days = 365
+
+        today = timezone.now().date()
+        start_date = today - timedelta(days=days - 1)
+
+        users_qs = User.objects.filter(is_superuser=False)
+
+        total_users = users_qs.count()
+        active_users = users_qs.filter(is_active=True, is_blocked=False).count()
+        blocked_users = users_qs.filter(is_blocked=True).count()
+        verified_users = users_qs.filter(is_verified=True).count()
+        subscribed_users = users_qs.filter(has_used_subscription=True).count()
+
+        countries = (
+            users_qs.values('country')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+        languages = (
+            users_qs.values('native_language')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+        levels = (
+            users_qs.values('level')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+
+        def normalize_bucket(row, field):
+            raw = row.get(field)
+            key = (raw or '').strip()
+            label = key or 'Unknown'
+            return {'key': key or 'unknown', 'label': label, 'count': int(row.get('count') or 0)}
+
+        def top_n_with_other(rows, field, n=8):
+            items = [normalize_bucket(r, field) for r in rows]
+            top = items[:n]
+            rest = items[n:]
+            other_count = sum(i['count'] for i in rest)
+            if other_count:
+                top.append({'key': 'other', 'label': 'Other', 'count': other_count})
+            return top
+
+        by_country = top_n_with_other(countries, 'country', n=8)
+        by_language = top_n_with_other(languages, 'native_language', n=8)
+        by_level = top_n_with_other(levels, 'level', n=6)
+
+        countries_count = sum(1 for r in countries if (r.get('country') or '').strip())
+        languages_count = sum(1 for r in languages if (r.get('native_language') or '').strip())
+
+        signups_qs = (
+            users_qs.filter(date_joined__date__gte=start_date, date_joined__date__lte=today)
+            .annotate(d=TruncDate('date_joined'))
+            .values('d')
+            .annotate(count=Count('id'))
+            .order_by('d')
+        )
+        signup_map = {row['d']: int(row['count'] or 0) for row in signups_qs}
+        signups_series = []
+        for i in range(days):
+            d = start_date + timedelta(days=i)
+            signups_series.append({'date': d.isoformat(), 'count': signup_map.get(d, 0)})
+
+        lessons_qs = Lesson.objects.all()
+        lessons_total = lessons_qs.count()
+        lessons_by_block = {b: lessons_qs.filter(block=b).count() for b in ['A1', 'A2', 'B1', 'B2', 'C1']}
+        lessons_with_video_file = lessons_qs.exclude(video_file='').exclude(video_file__isnull=True).count()
+        lessons_with_video_url = lessons_qs.exclude(video_url='').exclude(video_url__isnull=True).count()
+        lessons_with_lesson_pdf = lessons_qs.exclude(lesson_pdf='').exclude(lesson_pdf__isnull=True).count()
+        lessons_with_keys_pdf = lessons_qs.exclude(keys_pdf='').exclude(keys_pdf__isnull=True).count()
+
+        threads_qs = SupportThread.objects.all()
+        support_open = threads_qs.filter(status='open').count()
+        support_resolved = threads_qs.filter(status='resolved').count()
+        support_closed = threads_qs.filter(status='closed').count()
+
+        recent_users = []
+        for u in users_qs.order_by('-date_joined')[:12]:
+            recent_users.append({
+                'id': u.id,
+                'email': u.email,
+                'name': u.name,
+                'country': u.country,
+                'native_language': u.native_language,
+                'level': u.level,
+                'is_active': u.is_active,
+                'is_blocked': getattr(u, 'is_blocked', False),
+                'date_joined': u.date_joined,
+                'last_login': u.last_login,
+            })
+
+        return Response(
+            {
+                'generated_at': timezone.now(),
+                'window_days': days,
+                'users': {
+                    'total': total_users,
+                    'active': active_users,
+                    'blocked': blocked_users,
+                    'verified': verified_users,
+                    'subscribed': subscribed_users,
+                    'countries_count': countries_count,
+                    'languages_count': languages_count,
+                    'by_country': by_country,
+                    'by_language': by_language,
+                    'by_level': by_level,
+                    'signups': signups_series,
+                },
+                'lessons': {
+                    'total': lessons_total,
+                    'by_block': lessons_by_block,
+                    'with_video_file': lessons_with_video_file,
+                    'with_video_url': lessons_with_video_url,
+                    'with_lesson_pdf': lessons_with_lesson_pdf,
+                    'with_keys_pdf': lessons_with_keys_pdf,
+                },
+                'support': {
+                    'total': support_open + support_resolved + support_closed,
+                    'open': support_open,
+                    'resolved': support_resolved,
+                    'closed': support_closed,
+                },
+                'recent_users': recent_users,
+            },
+            status=status.HTTP_200_OK,
+        )
+    except Exception as e:
+        logger.error(f'Reports analytics error: {str(e)}')
         return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
