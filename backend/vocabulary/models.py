@@ -11,7 +11,7 @@ class LessonContent(models.Model):
 
 class Vocabulary(models.Model):
     word = models.CharField(max_length=255, unique=True)
-    image = models.ImageField(upload_to='vocabulary_images/')
+    image = models.ImageField(upload_to='exercise_images/')
     created_at = models.DateTimeField(default=timezone.now)
 
 
@@ -32,3 +32,34 @@ class Exercise(models.Model):
     class Meta:
         unique_together = ('type', 'question')
 
+
+class VocabularyExerciseSet(models.Model):
+    title = models.CharField(max_length=255)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='vocabulary_exercise_sets')
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class VocabularyEntry(models.Model):
+    exercise_set = models.ForeignKey(VocabularyExerciseSet, on_delete=models.CASCADE, related_name='entries')
+    word = models.CharField(max_length=255)
+    image_name = models.CharField(max_length=255)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = ('exercise_set', 'word')
+        ordering = ['created_at']
+
+
+class VocabularyExerciseProgress(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='vocabulary_exercise_progress')
+    exercise_set = models.ForeignKey(VocabularyExerciseSet, on_delete=models.CASCADE, related_name='progress')
+    completed_at = models.DateTimeField(null=True, blank=True)
+    correct_count = models.IntegerField(default=0)
+    total_count = models.IntegerField(default=0)
+    updated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = ('user', 'exercise_set')

@@ -54,7 +54,9 @@ INSTALLED_APPS = [
     'authentication',
     'support',
     'lessons',
+    'notifications',
     'vocabulary',
+    'daily_routine',
 ]
 
 MIDDLEWARE = [

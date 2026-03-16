@@ -173,19 +173,7 @@ function UserDashboard() {
                       onClick={() => setActiveTab("notifications")}
                     >
                       <span className="flex items-center">
-                        <svg
-                          className="h-4 w-4 mr-3"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M15 17h5l-5 5v-5zM11 19H6a2 2 0 01-2-2V7a2 2 0 012-2h5m5 0v5"
-                          />
-                        </svg>
+                        <i className="fas fa-bell h-4 w-4 mr-3"></i>
                         Notifications
                       </span>
                     </button>

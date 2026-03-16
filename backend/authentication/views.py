@@ -224,6 +224,7 @@ def verify_otp(request):
                     'gender': user.gender,
                     'age': user.age,
                     'profile_image': user.profile_image,
+                    'companion_image': getattr(user, 'companion_image', None),
                     'referral_source': user.referral_source,
                     'legal_notice_accepted': user.legal_notice_accepted,
                 }
@@ -358,6 +359,7 @@ def login_user(request):
                     'gender': user.gender,
                     'age': user.age,
                     'profile_image': user.profile_image,
+                    'companion_image': getattr(user, 'companion_image', None),
                     'referral_source': user.referral_source,
                     'legal_notice_accepted': user.legal_notice_accepted,
                     'is_staff': user.is_staff,
@@ -541,6 +543,7 @@ def get_user_profile(request):
             'gender': user.gender,
             'age': user.age,
             'profile_image': user.profile_image,
+            'companion_image': getattr(user, 'companion_image', None),
             'date_joined': user.date_joined,
             'is_staff': user.is_staff,
             'is_superuser': user.is_superuser,
@@ -583,6 +586,13 @@ def update_user_profile(request):
             user.age = int(data['age']) if data['age'] else None
         if 'profile_image' in data:
             user.profile_image = data['profile_image']
+        if 'companion_image' in data:
+            allowed = {c[0] for c in getattr(user, 'COMPANION_CHOICES', [])}
+            val = data.get('companion_image')
+            if val in allowed:
+                user.companion_image = val
+            else:
+                return Response({'error': 'Invalid companion_image'}, status=status.HTTP_400_BAD_REQUEST)
         if 'referral_source' in data:
             user.referral_source = data['referral_source']
         if 'legal_notice_accepted' in data:
@@ -605,6 +615,7 @@ def update_user_profile(request):
                 'gender': user.gender,
                 'age': user.age,
                 'profile_image': user.profile_image,
+                'companion_image': getattr(user, 'companion_image', None),
                 'referral_source': user.referral_source,
                 'legal_notice_accepted': user.legal_notice_accepted,
             }
@@ -1084,3 +1095,600 @@ def reports_analytics(request):
     except Exception as e:
         logger.error(f'Reports analytics error: {str(e)}')
         return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _payments_plan_details(plan_key: str | None):
+    key = (plan_key or '').strip().lower()
+    if key == 'yearly':
+        return {'plan_key': 'yearly', 'plan_label': 'Annual', 'amount_cents': 19700, 'interval_days': 365}
+    return {'plan_key': 'monthly', 'plan_label': 'Monthly', 'amount_cents': 2500, 'interval_days': 30}
+
+
+def _payments_subscription_start(user: User, onboarding: SubscriptionOnboarding | None):
+    if onboarding and onboarding.created_at:
+        return onboarding.created_at
+    if getattr(user, 'created_at', None):
+        return user.created_at
+    return user.date_joined
+
+
+def _payments_effective_due_at(user: User, start_at, plan: dict):
+    override = getattr(user, 'payment_due_override', None)
+    if override is not None:
+        return override
+    if not start_at:
+        return None
+    return start_at + timedelta(days=plan['interval_days'])
+
+
+def _pdf_escape(value: str) -> str:
+    return (value or '').replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+
+
+def _build_simple_pdf(lines: list[str]) -> bytes:
+    text_lines = [l if isinstance(l, str) else str(l) for l in (lines or [])]
+    y_start = 770
+    line_gap = 16
+    commands = ['BT', '/F1 12 Tf', f'50 {y_start} Td']
+    for idx, line in enumerate(text_lines):
+        if idx > 0:
+            commands.append(f'0 {-line_gap} Td')
+        commands.append(f'({_pdf_escape(line)}) Tj')
+    commands.append('ET')
+    stream = ('\n'.join(commands) + '\n').encode('latin-1', errors='ignore')
+
+    def obj(n: int, body: bytes) -> bytes:
+        return f'{n} 0 obj\n'.encode('ascii') + body + b'\nendobj\n'
+
+    objects: list[bytes] = []
+    objects.append(obj(1, b'<< /Type /Catalog /Pages 2 0 R >>'))
+    objects.append(obj(2, b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>'))
+    objects.append(
+        obj(
+            3,
+            b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+        )
+    )
+    objects.append(obj(4, b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'))
+    objects.append(
+        obj(
+            5,
+            b'<< /Length ' + str(len(stream)).encode('ascii') + b' >>\nstream\n' + stream + b'endstream',
+        )
+    )
+
+    header = b'%PDF-1.4\n%\xe2\xe3\xcf\xd3\n'
+    body = bytearray()
+    body.extend(header)
+
+    xref_offsets = [0]
+    for o in objects:
+        xref_offsets.append(len(body))
+        body.extend(o)
+
+    xref_start = len(body)
+    body.extend(b'xref\n')
+    body.extend(f'0 {len(xref_offsets)}\n'.encode('ascii'))
+    body.extend(b'0000000000 65535 f \n')
+    for off in xref_offsets[1:]:
+        body.extend(f'{off:010d} 00000 n \n'.encode('ascii'))
+
+    body.extend(b'trailer\n')
+    body.extend(f'<< /Size {len(xref_offsets)} /Root 1 0 R >>\n'.encode('ascii'))
+    body.extend(b'startxref\n')
+    body.extend(f'{xref_start}\n'.encode('ascii'))
+    body.extend(b'%%EOF\n')
+    return bytes(body)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_payments_overview(request):
+    if not request.user.is_staff:
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    now = timezone.now()
+    users_qs = User.objects.filter(is_superuser=False).select_related('subscription_onboarding').order_by('-date_joined')
+
+    users = []
+    active_subscriptions = []
+    overdue_subscriptions = []
+
+    est_total_revenue_cents = 0
+    est_mrr_cents = 0
+
+    for u in users_qs:
+        onboarding = getattr(u, 'subscription_onboarding', None)
+        plan = _payments_plan_details(getattr(onboarding, 'plan_key', None))
+        has_sub = bool(getattr(u, 'has_used_subscription', False))
+        start_at = _payments_subscription_start(u, onboarding) if has_sub else None
+        next_due = _payments_effective_due_at(u, start_at, plan)
+        is_overdue = bool(has_sub and next_due and next_due < now)
+
+        status_key = 'none'
+        if has_sub and is_overdue:
+            status_key = 'overdue'
+        elif has_sub:
+            status_key = 'active'
+
+        user_row = {
+            'id': u.id,
+            'name': u.name,
+            'email': u.email,
+            'plan_key': plan['plan_key'] if has_sub else None,
+            'plan_label': plan['plan_label'] if has_sub else None,
+            'amount_cents': plan['amount_cents'] if has_sub else 0,
+            'currency': 'USD',
+            'status': status_key,
+            'started_at': start_at.isoformat() if start_at else None,
+            'next_due': next_due.isoformat() if next_due else None,
+            'date_joined': u.date_joined.isoformat() if u.date_joined else None,
+        }
+        users.append(user_row)
+
+        if has_sub:
+            est_total_revenue_cents += int(plan['amount_cents'])
+            est_mrr_cents += int(plan['amount_cents']) if plan['plan_key'] == 'monthly' else int(round(plan['amount_cents'] / 12))
+
+            sub_row = {
+                'user_id': u.id,
+                'user_name': u.name,
+                'user_email': u.email,
+                'plan_label': plan['plan_label'],
+                'amount_cents': plan['amount_cents'],
+                'currency': 'USD',
+                'start_date': start_at.date().isoformat() if start_at else None,
+                'next_payment': next_due.date().isoformat() if next_due else None,
+                'status': 'Overdue' if is_overdue else 'Active',
+            }
+            if is_overdue:
+                days_past = (now.date() - next_due.date()).days if next_due else 0
+                overdue_subscriptions.append(
+                    {
+                        'user_id': u.id,
+                        'user_name': u.name,
+                        'email': u.email,
+                        'plan_label': plan['plan_label'],
+                        'amount_cents': plan['amount_cents'],
+                        'currency': 'USD',
+                        'due_date': next_due.date().isoformat() if next_due else None,
+                        'days_past_due': days_past,
+                    }
+                )
+            else:
+                active_subscriptions.append(sub_row)
+
+    plan_counts = {'monthly': 0, 'yearly': 0}
+    for r in users:
+        if r['plan_key'] == 'monthly':
+            plan_counts['monthly'] += 1
+        elif r['plan_key'] == 'yearly':
+            plan_counts['yearly'] += 1
+
+    return Response(
+        {
+            'generated_at': now.isoformat(),
+            'stats': {
+                'estimated_total_revenue_cents': est_total_revenue_cents,
+                'estimated_mrr_cents': est_mrr_cents,
+                'active_subscriptions': len(active_subscriptions),
+                'overdue_payments': len(overdue_subscriptions),
+                'subscribers_total': plan_counts['monthly'] + plan_counts['yearly'],
+            },
+            'plan_breakdown': plan_counts,
+            'users': users,
+            'subscriptions': active_subscriptions,
+            'overdue': overdue_subscriptions,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_send_payment_reminders(request):
+    if not request.user.is_staff:
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    from notifications.models import Notification, NotificationRecipient
+
+    now = timezone.now()
+    users_qs = User.objects.filter(is_superuser=False, has_used_subscription=True).select_related('subscription_onboarding')
+    overdue_ids: list[str] = []
+
+    for u in users_qs:
+        onboarding = getattr(u, 'subscription_onboarding', None)
+        plan = _payments_plan_details(getattr(onboarding, 'plan_key', None))
+        start_at = _payments_subscription_start(u, onboarding)
+        next_due = _payments_effective_due_at(u, start_at, plan)
+        if next_due and next_due < now:
+            overdue_ids.append(u.id)
+
+    title = (request.data or {}).get('title') if isinstance(request.data, dict) else None
+    message = (request.data or {}).get('message') if isinstance(request.data, dict) else None
+    title = (title or 'Payment overdue').strip()
+    message = (message or 'Your subscription payment is overdue. Please update your payment method to continue uninterrupted access.').strip()
+
+    notif = Notification.objects.create(type='alert', title=title, message=message, audience_filters={'mode': 'overdue'}, created_by=request.user)
+
+    existing = set(
+        NotificationRecipient.objects.filter(notification=notif, user_id__in=overdue_ids).values_list('user_id', flat=True)
+    )
+    to_create = []
+    for uid in overdue_ids:
+        if uid in existing:
+            continue
+        to_create.append(NotificationRecipient(notification=notif, user_id=uid, delivered_at=now))
+    NotificationRecipient.objects.bulk_create(to_create, batch_size=1000)
+    notif.sent_at = now
+    notif.save(update_fields=['sent_at'])
+
+    return Response({'sent_to': len(to_create), 'overdue_users': len(overdue_ids)}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_download_invoices(request):
+    if not request.user.is_staff:
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    import io
+    import zipfile
+    from django.http import HttpResponse
+
+    now = timezone.now()
+    users_qs = User.objects.filter(is_superuser=False).select_related('subscription_onboarding').order_by('email')
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        for u in users_qs:
+            onboarding = getattr(u, 'subscription_onboarding', None)
+            has_sub = bool(getattr(u, 'has_used_subscription', False))
+            plan = _payments_plan_details(getattr(onboarding, 'plan_key', None))
+            start_at = _payments_subscription_start(u, onboarding) if has_sub else None
+            next_due = _payments_effective_due_at(u, start_at, plan)
+            is_overdue = bool(has_sub and next_due and next_due < now)
+
+            issued = now.date().isoformat()
+            invoice_number = f'INV-{now.strftime("%Y%m%d")}-{u.id[-6:]}'
+            amount_cents = plan['amount_cents'] if has_sub else 0
+
+            lines = [
+                'Daily Spanish',
+                'Invoice',
+                '',
+                f'Invoice #: {invoice_number}',
+                f'Issued on: {issued}',
+                '',
+                f'Bill to: {(u.name or "").strip() or "User"}',
+                f'Email: {u.email}',
+                '',
+                f'Plan: {plan["plan_label"] if has_sub else "N/A"}',
+                f'Amount: ${amount_cents / 100:.2f} USD',
+                f'Status: {"Overdue" if is_overdue else "Paid" if has_sub else "No subscription record"}',
+                f'Next due: {next_due.date().isoformat() if next_due else "N/A"}',
+            ]
+            pdf_bytes = _build_simple_pdf(lines)
+            safe_email = (u.email or u.id).replace('@', '_at_').replace('/', '_')
+            zf.writestr(f'{safe_email}_{invoice_number}.pdf', pdf_bytes)
+
+    zip_bytes = buf.getvalue()
+    resp = HttpResponse(zip_bytes, content_type='application/zip')
+    resp['Content-Disposition'] = f'attachment; filename="invoices_{now.strftime("%Y%m%d_%H%M%S")}.zip"'
+    return resp
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_export_financial_report(request):
+    if not request.user.is_staff:
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    import io
+    from django.http import HttpResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    now = timezone.now()
+    users_qs = User.objects.filter(is_superuser=False).select_related('subscription_onboarding').order_by('email')
+
+    subscribers = []
+    overdue = []
+    plan_counts = {'monthly': 0, 'yearly': 0}
+    est_total_revenue_cents = 0
+    est_mrr_cents = 0
+
+    for u in users_qs:
+        onboarding = getattr(u, 'subscription_onboarding', None)
+        has_sub = bool(getattr(u, 'has_used_subscription', False))
+        plan = _payments_plan_details(getattr(onboarding, 'plan_key', None))
+        if has_sub:
+            plan_counts[plan['plan_key']] += 1
+            est_total_revenue_cents += int(plan['amount_cents'])
+            est_mrr_cents += int(plan['amount_cents']) if plan['plan_key'] == 'monthly' else int(round(plan['amount_cents'] / 12))
+
+        start_at = _payments_subscription_start(u, onboarding) if has_sub else None
+        next_due = _payments_effective_due_at(u, start_at, plan)
+        is_overdue = bool(has_sub and next_due and next_due < now)
+
+        row = {
+            'id': u.id,
+            'name': u.name,
+            'email': u.email,
+            'plan': plan['plan_label'] if has_sub else '',
+            'amount_usd': float(plan['amount_cents'] / 100) if has_sub else 0.0,
+            'started_at': start_at.date().isoformat() if start_at else '',
+            'next_due': next_due.date().isoformat() if next_due else '',
+            'status': 'Overdue' if is_overdue else 'Active' if has_sub else 'None',
+        }
+        subscribers.append(row)
+        if is_overdue:
+            overdue.append(row)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Summary'
+    header_font = Font(bold=True, color='FFFFFF')
+    header_fill = PatternFill('solid', fgColor='3B4BB1')
+    ws['A1'] = 'Daily Spanish — Financial Report'
+    ws['A1'].font = Font(bold=True, size=14)
+    ws['A2'] = f'Generated at (UTC): {now.strftime("%Y-%m-%d %H:%M:%S")}'
+
+    ws['A4'] = 'Estimated total revenue (USD)'
+    ws['B4'] = float(est_total_revenue_cents / 100)
+    ws['A5'] = 'Estimated MRR (USD)'
+    ws['B5'] = float(est_mrr_cents / 100)
+    ws['A6'] = 'Monthly subscribers'
+    ws['B6'] = plan_counts['monthly']
+    ws['A7'] = 'Annual subscribers'
+    ws['B7'] = plan_counts['yearly']
+    ws['A8'] = 'Overdue subscribers'
+    ws['B8'] = len(overdue)
+
+    ws2 = wb.create_sheet('Subscriptions')
+    ws3 = wb.create_sheet('Overdue')
+
+    def write_table(sheet, rows):
+        cols = ['id', 'name', 'email', 'plan', 'amount_usd', 'started_at', 'next_due', 'status']
+        for c_idx, c in enumerate(cols, start=1):
+            cell = sheet.cell(row=1, column=c_idx, value=c.upper())
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center')
+        for r_idx, row in enumerate(rows, start=2):
+            for c_idx, c in enumerate(cols, start=1):
+                sheet.cell(row=r_idx, column=c_idx, value=row.get(c))
+        sheet.freeze_panes = 'A2'
+        sheet.auto_filter.ref = f'A1:H{max(1, len(rows) + 1)}'
+        widths = [18, 18, 30, 12, 14, 12, 12, 12]
+        for i, w in enumerate(widths, start=1):
+            sheet.column_dimensions[chr(64 + i)].width = w
+
+    write_table(ws2, subscribers)
+    write_table(ws3, overdue)
+
+    out = io.BytesIO()
+    wb.save(out)
+    data = out.getvalue()
+    resp = HttpResponse(data, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    resp['Content-Disposition'] = f'attachment; filename="financial_report_{now.strftime("%Y%m%d_%H%M%S")}.xlsx"'
+    return resp
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_download_invoice(request, user_id: str):
+    if not request.user.is_staff:
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    from django.http import HttpResponse
+
+    u = User.objects.filter(id=user_id, is_superuser=False).select_related('subscription_onboarding').first()
+    if not u:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    now = timezone.now()
+    onboarding = getattr(u, 'subscription_onboarding', None)
+    has_sub = bool(getattr(u, 'has_used_subscription', False))
+    plan = _payments_plan_details(getattr(onboarding, 'plan_key', None))
+    start_at = _payments_subscription_start(u, onboarding) if has_sub else None
+    due_at = _payments_effective_due_at(u, start_at, plan)
+    is_overdue = bool(has_sub and due_at and due_at < now)
+
+    issued = now.date().isoformat()
+    invoice_number = f'INV-{now.strftime("%Y%m%d")}-{u.id[-6:]}'
+    amount_cents = plan['amount_cents'] if has_sub else 0
+
+    lines = [
+        'Daily Spanish',
+        'Invoice',
+        '',
+        f'Invoice #: {invoice_number}',
+        f'Issued on: {issued}',
+        '',
+        f'Bill to: {(u.name or "").strip() or "User"}',
+        f'Email: {u.email}',
+        '',
+        f'Plan: {plan["plan_label"] if has_sub else "N/A"}',
+        f'Amount: ${amount_cents / 100:.2f} USD',
+        f'Status: {"Overdue" if is_overdue else "Paid" if has_sub else "No subscription record"}',
+        f'Due date: {due_at.date().isoformat() if due_at else "N/A"}',
+    ]
+    pdf_bytes = _build_simple_pdf(lines)
+
+    safe_email = (u.email or u.id).replace('@', '_at_').replace('/', '_')
+    resp = HttpResponse(pdf_bytes, content_type='application/pdf')
+    resp['Content-Disposition'] = f'attachment; filename="{safe_email}_{invoice_number}.pdf"'
+    return resp
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_send_payment_reminder(request, user_id: str):
+    if not request.user.is_staff:
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    from notifications.models import Notification, NotificationRecipient
+
+    u = User.objects.filter(id=user_id, is_superuser=False).first()
+    if not u:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    title = (request.data or {}).get('title') if isinstance(request.data, dict) else None
+    message = (request.data or {}).get('message') if isinstance(request.data, dict) else None
+    title = (title or 'Payment reminder').strip()
+    message = (message or 'Your subscription payment is overdue. Please update your payment method to continue uninterrupted access.').strip()
+
+    now = timezone.now()
+    notif = Notification.objects.create(type='alert', title=title, message=message, audience_filters={'mode': 'user', 'user_id': u.id}, created_by=request.user)
+    NotificationRecipient.objects.get_or_create(notification=notif, user=u, defaults={'delivered_at': now})
+    notif.sent_at = now
+    notif.save(update_fields=['sent_at'])
+    return Response({'sent_to': 1}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_extend_payment_due(request, user_id: str):
+    if not request.user.is_staff:
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    u = User.objects.filter(id=user_id, is_superuser=False).select_related('subscription_onboarding').first()
+    if not u:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    data = request.data if isinstance(request.data, dict) else {}
+    days_raw = data.get('days')
+    due_date_raw = data.get('due_date')
+
+    days = 7
+    if days_raw not in [None, '']:
+        try:
+            days = int(days_raw)
+        except Exception:
+            return Response({'error': 'Invalid days'}, status=status.HTTP_400_BAD_REQUEST)
+    if days < 1:
+        return Response({'error': 'Days must be >= 1'}, status=status.HTTP_400_BAD_REQUEST)
+    if days > 365:
+        return Response({'error': 'Days too large'}, status=status.HTTP_400_BAD_REQUEST)
+
+    now = timezone.now()
+    onboarding = getattr(u, 'subscription_onboarding', None)
+    plan = _payments_plan_details(getattr(onboarding, 'plan_key', None))
+    has_sub = bool(getattr(u, 'has_used_subscription', False))
+    start_at = _payments_subscription_start(u, onboarding) if has_sub else None
+    computed_due = _payments_effective_due_at(u, start_at, plan)
+
+    if due_date_raw:
+        try:
+            from datetime import datetime as dt_datetime, timezone as dt_timezone
+
+            target = dt_datetime.fromisoformat(str(due_date_raw))
+            if timezone.is_naive(target):
+                target = timezone.make_aware(target, timezone=dt_timezone.utc)
+        except Exception:
+            return Response({'error': 'Invalid due_date'}, status=status.HTTP_400_BAD_REQUEST)
+        u.payment_due_override = target
+        u.save(update_fields=['payment_due_override', 'updated_at'])
+        return Response({'due_at': u.payment_due_override.isoformat()}, status=status.HTTP_200_OK)
+
+    base = computed_due if computed_due else now
+    if base < now:
+        base = now
+    u.payment_due_override = base + timedelta(days=days)
+    u.save(update_fields=['payment_due_override', 'updated_at'])
+    return Response({'due_at': u.payment_due_override.isoformat()}, status=status.HTTP_200_OK)
+
+
+def _build_user_receipts(user: User):
+    now = timezone.now()
+    onboarding = getattr(user, 'subscription_onboarding', None)
+    has_sub = bool(getattr(user, 'has_used_subscription', False))
+    plan = _payments_plan_details(getattr(onboarding, 'plan_key', None))
+
+    receipts = []
+
+    if has_sub:
+        issued_at = _payments_subscription_start(user, onboarding)
+        invoice_number = f'INV-{issued_at.strftime("%Y")}-{user.id[-6:]}'
+        receipt_id = f'receipt_{invoice_number}'
+        course = f'Daily Spanish {plan["plan_label"]} Subscription'
+        receipts.append(
+            {
+                'id': receipt_id,
+                'date': issued_at.isoformat(),
+                'course': course,
+                'amount': f'${plan["amount_cents"] / 100:.2f}',
+                'status': 'Paid',
+                'invoice_id': invoice_number,
+            }
+        )
+
+    if not has_sub and onboarding is not None:
+        issued_at = onboarding.created_at or now
+        invoice_number = f'INV-{issued_at.strftime("%Y")}-{user.id[-6:]}-P'
+        receipt_id = f'receipt_{invoice_number}'
+        course = f'Daily Spanish {plan["plan_label"]} Subscription'
+        receipts.append(
+            {
+                'id': receipt_id,
+                'date': issued_at.isoformat(),
+                'course': course,
+                'amount': f'${plan["amount_cents"] / 100:.2f}',
+                'status': 'Pending',
+                'invoice_id': invoice_number,
+            }
+        )
+
+    return receipts
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def my_receipts(request):
+    user = request.user
+    return Response({'receipts': _build_user_receipts(user)}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_my_receipt(request, receipt_id: str):
+    user = request.user
+    receipts = _build_user_receipts(user)
+    match = None
+    for r in receipts:
+        if r.get('id') == receipt_id:
+            match = r
+            break
+    if match is None:
+        return Response({'error': 'Receipt not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    from django.http import HttpResponse
+
+    now = timezone.now()
+    invoice_number = match.get('invoice_id') or f'INV-{now.strftime("%Y%m%d")}-{user.id[-6:]}'
+    issued_on = match.get('date') or now.isoformat()
+    course = match.get('course') or 'Daily Spanish Subscription'
+    amount_raw = match.get('amount') or '$0.00'
+    status = match.get('status') or 'Paid'
+
+    lines = [
+        'Daily Spanish',
+        'Receipt',
+        '',
+        f'Invoice #: {invoice_number}',
+        f'Issued on: {issued_on}',
+        '',
+        f'Billed to: {(user.name or "").strip() or "User"}',
+        f'Email: {user.email}',
+        '',
+        f'Course/Package: {course}',
+        f'Amount: {amount_raw} USD',
+        f'Status: {status}',
+    ]
+    pdf_bytes = _build_simple_pdf(lines)
+
+    safe_email = (user.email or user.id).replace('@', '_at_').replace('/', '_')
+    resp = HttpResponse(pdf_bytes, content_type='application/pdf')
+    resp['Content-Disposition'] = f'attachment; filename="{safe_email}_{invoice_number}.pdf"'
+    return resp

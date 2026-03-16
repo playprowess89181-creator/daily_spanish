@@ -706,24 +706,21 @@ export default function LoginPage() {
             <div className="flex justify-center mb-8">
               <div className="relative">
                 <div
-                  className="w-24 h-24 rounded-full flex items-center justify-center border shadow-2xl"
+                  className="w-24 h-24 rounded-full flex items-center justify-center border shadow-2xl overflow-hidden relative"
                   style={{
                     background: 'rgba(255, 255, 255, 0.2)',
                     backdropFilter: 'blur(2px)',
                     borderColor: 'rgba(255, 255, 255, 0.3)'
                   }}
                 >
-                  <svg
-                    className="h-12 w-12 text-white"
-                    fill="none"
-                    viewBox="0 0 48 48"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path
-                      d="M24 4C25.7818 14.2173 33.7827 22.2182 44 24C33.7827 25.7818 25.7818 33.7827 24 44C22.2182 33.7827 14.2173 25.7818 4 24C14.2173 22.2182 22.2182 14.2173 24 4Z"
-                      fill="currentColor"
-                    ></path>
-                  </svg>
+                  <Image
+                    src="/assets/images/O_3.PNG"
+                    alt="Daily Spanish mascot"
+                    fill
+                    sizes="96px"
+                    className="object-cover"
+                    priority
+                  />
                 </div>
                 <div className="absolute -top-2 -right-2 w-6 h-6 bg-yellow-400 rounded-full animate-ping"></div>
               </div>

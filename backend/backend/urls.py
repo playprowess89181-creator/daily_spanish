@@ -24,7 +24,9 @@ urlpatterns = [
     path('api/auth/', include('authentication.urls')),
     path('api/support/', include('support.urls')),
     path('api/lessons/', include('lessons.urls')),
+    path('api/notifications/', include('notifications.urls')),
     path('api/v1/vocabulary-exercises/', include('vocabulary.urls')),
+    path('api/v1/daily-routine-exercises/', include('daily_routine.urls')),
 ]
 
 if settings.DEBUG:

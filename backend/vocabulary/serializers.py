@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Vocabulary, Exercise, LessonContent
+from .models import Vocabulary, Exercise, LessonContent, VocabularyExerciseSet, VocabularyEntry
 
 
 class VocabularySerializer(serializers.ModelSerializer):
@@ -21,3 +21,24 @@ class LessonContentSerializer(serializers.ModelSerializer):
         model = LessonContent
         fields = ['id', 'title', 'created_by', 'created_at']
 
+
+class VocabularyEntrySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VocabularyEntry
+        fields = ['id', 'word', 'image_name', 'created_at']
+
+
+class VocabularyExerciseSetSerializer(serializers.ModelSerializer):
+    word_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = VocabularyExerciseSet
+        fields = ['id', 'title', 'word_count', 'created_at']
+
+
+class VocabularyExerciseSetDetailSerializer(serializers.ModelSerializer):
+    entries = VocabularyEntrySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = VocabularyExerciseSet
+        fields = ['id', 'title', 'entries', 'created_at']

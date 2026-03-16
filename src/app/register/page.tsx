@@ -168,10 +168,15 @@ export default function RegisterPage() {
           <div className="z-10 text-center text-white px-12">
             <div className="flex justify-center mb-8">
               <div className="relative">
-                <div className="w-24 h-24 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center border border-white/30 shadow-2xl">
-                  <svg className="h-12 w-12 text-white" fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M24 4C25.7818 14.2173 33.7827 22.2182 44 24C33.7827 25.7818 25.7818 33.7827 24 44C22.2182 33.7827 14.2173 25.7818 4 24C14.2173 22.2182 22.2182 14.2173 24 4Z" fill="currentColor"></path>
-                  </svg>
+                <div className="w-24 h-24 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center border border-white/30 shadow-2xl overflow-hidden relative">
+                  <Image
+                    src="/assets/images/O_3.PNG"
+                    alt="Daily Spanish mascot"
+                    fill
+                    sizes="96px"
+                    className="object-cover"
+                    priority
+                  />
                 </div>
                 <div className="absolute -top-2 -right-2 w-6 h-6 bg-yellow-400 rounded-full animate-ping"></div>
               </div>
@@ -241,10 +246,15 @@ export default function RegisterPage() {
             <div className="glass-effect rounded-3xl shadow-2xl p-8 border border-white/20">
               <div className="text-center mb-8">
                 <div className="flex justify-center mb-4">
-                  <div className="w-16 h-16 rounded-full flex items-center justify-center shadow-lg" style={{ background: 'linear-gradient(135deg, #3B4BB1, #F25A37)' }}>
-                    <svg className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
+                  <div className="w-16 h-16 rounded-full flex items-center justify-center shadow-lg overflow-hidden relative" style={{ background: 'linear-gradient(135deg, #3B4BB1, #F25A37)' }}>
+                    <Image
+                      src="/assets/images/O_3.PNG"
+                      alt="Daily Spanish mascot"
+                      fill
+                      sizes="64px"
+                      className="object-cover"
+                      priority
+                    />
                   </div>
                 </div>
                 <h2 className="text-3xl font-bold gradient-text mb-2" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>

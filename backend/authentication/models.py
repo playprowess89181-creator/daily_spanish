@@ -31,10 +31,18 @@ class User(AbstractUser):
     gender = models.CharField(max_length=20, null=True, blank=True)
     age = models.IntegerField(null=True, blank=True)
     profile_image = models.TextField(null=True, blank=True)
+    COMPANION_CHOICES = [
+        ('B_1', 'B_1'),
+        ('G_1', 'G_1'),
+        ('O_1', 'O_1'),
+        ('P_1', 'P_1'),
+    ]
+    companion_image = models.CharField(max_length=10, choices=COMPANION_CHOICES, null=True, blank=True)
     referral_source = models.CharField(max_length=100, null=True, blank=True)
     legal_notice_accepted = models.BooleanField(default=False)
     legal_notice_accepted_at = models.DateTimeField(null=True, blank=True)
     has_used_subscription = models.BooleanField(default=False)
+    payment_due_override = models.DateTimeField(null=True, blank=True)
     is_verified = models.BooleanField(default=False)
     is_blocked = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)

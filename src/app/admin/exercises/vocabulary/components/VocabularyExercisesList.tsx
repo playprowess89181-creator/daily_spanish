@@ -1,19 +1,19 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 
 type Item = {
   id: number;
-  type: string;
-  question: string;
-  options: string[];
-  answer: string;
-  vocabulary_word?: string;
+  title: string;
+  word_count: number;
+  created_at: string;
 };
 
 export default function VocabularyExercisesList() {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
   function useAccessToken() {
@@ -23,17 +23,44 @@ export default function VocabularyExercisesList() {
 
   const token = useAccessToken();
 
-  useEffect(() => {
+  const load = async () => {
     if (!token) return;
     setLoading(true);
-    fetch(`${API_BASE}/api/v1/vocabulary-exercises`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-    }).then(async (r) => {
+    try {
+      const r = await fetch(`${API_BASE}/api/v1/vocabulary-exercises/exercise-sets`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store',
+      });
       if (!r.ok) return;
       const data = await r.json();
       setItems(Array.isArray(data) ? data : []);
-    }).catch(() => {}).finally(() => setLoading(false));
+    } catch {
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
   }, [token, API_BASE]);
+
+  const onDelete = async (id: number) => {
+    if (!token) return;
+    const ok = window.confirm('Delete this exercise? This cannot be undone.');
+    if (!ok) return;
+    setDeletingId(id);
+    try {
+      const r = await fetch(`${API_BASE}/api/v1/vocabulary-exercises/exercise-sets/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (r.ok) {
+        await load();
+      }
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
@@ -42,17 +69,30 @@ export default function VocabularyExercisesList() {
         {loading && <span className="text-sm text-gray-500">Loading…</span>}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {items.map((exercise) => (
-          <div key={exercise.id} className="rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow">
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="text-xs text-gray-500">{exercise.type}</div>
-                <div className="text-sm font-semibold text-gray-900 mt-1">{exercise.question}</div>
+        {items.map((ex) => (
+          <div key={ex.id} className="rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow bg-white">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-gray-900 truncate">{ex.title}</div>
+                <div className="mt-1 text-xs text-gray-600">{ex.word_count} words</div>
+                <div className="mt-1 text-xs text-gray-500">{new Date(ex.created_at).toLocaleString()}</div>
               </div>
-              <span className="text-xs px-2 py-1 rounded-full bg-blue-50 text-blue-700">{exercise.vocabulary_word || '—'}</span>
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/admin/exercises/vocabulary/${ex.id}/edit`}
+                  className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-800 hover:bg-gray-200 text-xs"
+                >
+                  Edit
+                </Link>
+                <button
+                  onClick={() => onDelete(ex.id)}
+                  disabled={deletingId === ex.id}
+                  className="px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 text-xs disabled:opacity-50"
+                >
+                  {deletingId === ex.id ? 'Deleting…' : 'Delete'}
+                </button>
+              </div>
             </div>
-            <div className="mt-3 text-xs text-gray-600">Options: {exercise.options?.join(', ')}</div>
-            <div className="mt-1 text-xs text-gray-600">Answer: <span className="text-green-600 font-medium">{exercise.answer}</span></div>
           </div>
         ))}
         {items.length === 0 && !loading && (

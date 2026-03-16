@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 
 type ConfirmVariant = 'primary' | 'danger';
@@ -27,15 +29,21 @@ export default function ConfirmDialog({
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
-  if (!open) return null;
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!open || !mounted) return null;
 
   const confirmStyle =
     variant === 'danger'
       ? ({ backgroundColor: '#ef4444' } as React.CSSProperties)
       : ({ backgroundColor: 'var(--azul-ultramar)' } as React.CSSProperties);
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
+  return createPortal(
+    <div className="fixed inset-0 z-[300] flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose}></div>
       <div className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl border border-gray-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-200">
@@ -64,7 +72,7 @@ export default function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
-

@@ -1,14 +1,231 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function MyExercises() {
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
   const router = useRouter();
+
+  function getAccessToken() {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
+  }
+
+  const [view, setView] = useState<'home' | 'vocab-levels' | 'daily-levels'>('home');
+  const [progress, setProgress] = useState<{ total: number; completed: number }>({ total: 0, completed: 0 });
+  const [sets, setSets] = useState<Array<{ id: number; title: string; word_count: number; created_at: string }>>([]);
+  const [loadingSets, setLoadingSets] = useState(false);
+
+  const [dailyProgress, setDailyProgress] = useState<{ total: number; completed: number }>({ total: 0, completed: 0 });
+  const [dailySets, setDailySets] = useState<Array<{ id: number; title: string; sentence_count: number; created_at: string }>>([]);
+  const [loadingDailySets, setLoadingDailySets] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const pct = useMemo(() => {
+    if (!progress.total) return 0;
+    return Math.round((progress.completed / progress.total) * 100);
+  }, [progress.completed, progress.total]);
+
+  const dailyPct = useMemo(() => {
+    if (!dailyProgress.total) return 0;
+    return Math.round((dailyProgress.completed / dailyProgress.total) * 100);
+  }, [dailyProgress.completed, dailyProgress.total]);
+
+  const loadProgress = useCallback(async () => {
+    const token = getAccessToken();
+    if (!token) return;
+    try {
+      const r = await fetch(`${API_BASE}/api/v1/vocabulary-exercises/progress`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      if (!r.ok) return;
+      const data = await r.json();
+      setProgress({ total: data?.total ?? 0, completed: data?.completed ?? 0 });
+    } catch {
+    }
+  }, [API_BASE]);
+
+  const loadDailyProgress = useCallback(async () => {
+    const token = getAccessToken();
+    if (!token) return;
+    try {
+      const r = await fetch(`${API_BASE}/api/v1/daily-routine-exercises/progress`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      if (!r.ok) return;
+      const data = await r.json();
+      setDailyProgress({ total: data?.total ?? 0, completed: data?.completed ?? 0 });
+    } catch {
+    }
+  }, [API_BASE]);
+
+  const loadSets = useCallback(async () => {
+    const token = getAccessToken();
+    if (!token) return;
+    setLoadingSets(true);
+    try {
+      const r = await fetch(`${API_BASE}/api/v1/vocabulary-exercises/exercise-sets`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      if (!r.ok) return;
+      const data = await r.json();
+      setSets(Array.isArray(data) ? data : []);
+    } catch {
+    } finally {
+      setLoadingSets(false);
+    }
+  }, [API_BASE]);
+
+  const loadDailySets = useCallback(async () => {
+    const token = getAccessToken();
+    if (!token) return;
+    setLoadingDailySets(true);
+    try {
+      const r = await fetch(`${API_BASE}/api/v1/daily-routine-exercises/exercise-sets`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      if (!r.ok) return;
+      const data = await r.json();
+      setDailySets(Array.isArray(data) ? data : []);
+    } catch {
+    } finally {
+      setLoadingDailySets(false);
+    }
+  }, [API_BASE]);
+
+  useEffect(() => {
+    loadProgress();
+    loadSets();
+    loadDailyProgress();
+    loadDailySets();
+  }, [loadDailyProgress, loadDailySets, loadProgress, loadSets]);
+
+  const startVocabulary = () => {
+    setError(null);
+    setView('vocab-levels');
+  };
+
+  const startDailyRoutine = () => {
+    setError(null);
+    setView('daily-levels');
+  };
 
   const handleExerciseClick = (exercisePath: string) => {
     router.push(exercisePath);
   };
+
+  if (view === 'vocab-levels') {
+    const sorted = [...sets].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return (
+      <div>
+        <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+          <div className="min-w-0">
+            <h3 className="text-2xl font-bold gradient-text" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Vocabulary Matching
+            </h3>
+            <p className="text-gray-600 mt-1">Choose a level to begin</p>
+          </div>
+          <button
+            onClick={() => setView('home')}
+            className="px-4 py-2 rounded-lg bg-gray-100 text-gray-800 hover:bg-gray-200 font-semibold"
+          >
+            Back
+          </button>
+        </div>
+
+        {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
+
+        {loadingSets ? (
+          <div className="glass-effect rounded-xl p-6 border border-white/20">
+            <p className="text-gray-700">Loading…</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {sorted.map((s, idx) => (
+              <button
+                key={s.id}
+                onClick={() => router.push(`/exercises/vocabulary-matching/${s.id}`)}
+                className="text-left glass-effect rounded-xl p-6 border border-white/20 hover:shadow-lg transition-all duration-300 disabled:opacity-60"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs text-gray-500">Level {idx + 1}</div>
+                    <div className="text-lg font-bold text-gray-900 truncate">{s.title}</div>
+                    <div className="text-sm text-gray-600 mt-1">{s.word_count} questions</div>
+                  </div>
+                  <div className="text-gray-400">
+                    <i className="fas fa-chevron-right"></i>
+                  </div>
+                </div>
+              </button>
+            ))}
+            {sorted.length === 0 && (
+              <div className="text-sm text-gray-600">No vocabulary exercises available yet.</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (view === 'daily-levels') {
+    const sorted = [...dailySets].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return (
+      <div>
+        <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+          <div className="min-w-0">
+            <h3 className="text-2xl font-bold gradient-text" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              Daily Routine
+            </h3>
+            <p className="text-gray-600 mt-1">Choose an exercise to begin</p>
+          </div>
+          <button
+            onClick={() => setView('home')}
+            className="px-4 py-2 rounded-lg bg-gray-100 text-gray-800 hover:bg-gray-200 font-semibold"
+          >
+            Back
+          </button>
+        </div>
+
+        {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
+
+        {loadingDailySets ? (
+          <div className="glass-effect rounded-xl p-6 border border-white/20">
+            <p className="text-gray-700">Loading…</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {sorted.map((s, idx) => (
+              <button
+                key={s.id}
+                onClick={() => router.push(`/exercises/daily-routine?set=${s.id}`)}
+                className="text-left glass-effect rounded-xl p-6 border border-white/20 hover:shadow-lg transition-all duration-300"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs text-gray-500">Level {idx + 1}</div>
+                    <div className="text-lg font-bold text-gray-900 truncate">{s.title}</div>
+                    <div className="text-sm text-gray-600 mt-1">{s.sentence_count} sentences</div>
+                  </div>
+                  <div className="text-gray-400">
+                    <i className="fas fa-chevron-right"></i>
+                  </div>
+                </div>
+              </button>
+            ))}
+            {sorted.length === 0 && (
+              <div className="text-sm text-gray-600">No daily routine exercises available yet.</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -17,10 +234,7 @@ export default function MyExercises() {
       </h3>
       <p className="text-gray-600 mb-8">Interactive activities to enhance your Spanish learning</p>
       
-      {/* Exercise Categories Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        
-        {/* Vocabulary Matching Game */}
         <div className="glass-effect rounded-xl p-6 border border-white/20 hover:shadow-lg transition-all duration-300">
           <div className="flex items-center mb-4">
             <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg flex items-center justify-center mr-4">
@@ -35,21 +249,20 @@ export default function MyExercises() {
           </div>
           <p className="text-gray-700 mb-4">Match Spanish words with their corresponding images or English translations. Test your vocabulary knowledge through visual and textual associations.</p>
           <div className="flex items-center justify-between mb-4">
-            <span className="text-sm text-gray-600">Progress: 15/25 completed</span>
-            <span className="text-sm font-semibold text-purple-600">60% Complete</span>
+            <span className="text-sm text-gray-600">Progress: {progress.completed}/{progress.total} completed</span>
+            <span className="text-sm font-semibold text-purple-600">{pct}% Complete</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
-            <div className="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full" style={{width: '60%'}}></div>
+            <div className="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full" style={{width: `${pct}%`}}></div>
           </div>
           <button 
-            onClick={() => handleExerciseClick('/exercises/vocabulary-matching')}
+            onClick={startVocabulary}
             className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white px-4 py-3 rounded-lg font-semibold hover:shadow-lg transition-all duration-300"
           >
-            Start Vocabulary Matching
+            Start Vocabulary
           </button>
         </div>
         
-        {/* Sentence Formation Game */}
         <div className="glass-effect rounded-xl p-6 border border-white/20 hover:shadow-lg transition-all duration-300">
           <div className="flex items-center mb-4">
             <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center mr-4">
@@ -58,23 +271,23 @@ export default function MyExercises() {
               </svg>
             </div>
             <div>
-              <h4 className="text-xl font-bold text-gray-800">Sentence Formation</h4>
+              <h4 className="text-xl font-bold text-gray-800">Daily Routine</h4>
               <p className="text-sm text-gray-600">Drag & drop words</p>
             </div>
           </div>
           <p className="text-gray-700 mb-4">Build correct Spanish sentences by dragging and dropping words in the proper order. Practice sentence structure and word placement.</p>
           <div className="flex items-center justify-between mb-4">
-            <span className="text-sm text-gray-600">Progress: 12/20 completed</span>
-            <span className="text-sm font-semibold text-blue-600">60% Complete</span>
+            <span className="text-sm text-gray-600">Progress: {dailyProgress.completed}/{dailyProgress.total} completed</span>
+            <span className="text-sm font-semibold text-blue-600">{dailyPct}% Complete</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
-            <div className="bg-gradient-to-r from-blue-500 to-cyan-500 h-2 rounded-full" style={{width: '60%'}}></div>
+            <div className="bg-gradient-to-r from-blue-500 to-cyan-500 h-2 rounded-full" style={{width: `${dailyPct}%`}}></div>
           </div>
           <button 
-            onClick={() => handleExerciseClick('/exercises/sentence-formation')}
+            onClick={startDailyRoutine}
             className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 text-white px-4 py-3 rounded-lg font-semibold hover:shadow-lg transition-all duration-300"
           >
-            Start Sentence Formation
+            Start Daily Routine
           </button>
         </div>
         
@@ -195,12 +408,11 @@ export default function MyExercises() {
         </div>
       </div>
       
-      {/* Exercise Statistics */}
       <div className="glass-effect rounded-xl p-6 border border-white/20 mt-8">
         <h4 className="text-xl font-bold text-gray-800 mb-4">Exercise Statistics</h4>
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <div className="text-center p-4 bg-purple-50 rounded-lg">
-            <div className="text-2xl font-bold text-purple-600 mb-1">15</div>
+            <div className="text-2xl font-bold text-purple-600 mb-1">{progress.completed}</div>
             <div className="text-sm text-gray-600">Vocabulary Matches</div>
           </div>
           <div className="text-center p-4 bg-blue-50 rounded-lg">

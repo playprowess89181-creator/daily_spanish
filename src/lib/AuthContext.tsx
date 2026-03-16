@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface User {
@@ -11,6 +11,8 @@ interface User {
   native_language: string;
   nickname: string;
   gender: string;
+  level?: string;
+  companion_image?: string | null;
   age?: number;
   profile_image: string;
   date_joined: string;
@@ -50,22 +52,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const isAuthenticated = !!user;
 
   // Get stored tokens
-  const getAccessToken = () => {
+  const getAccessToken = useCallback(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
     }
     return null;
-  };
+  }, []);
 
-  const getRefreshToken = () => {
+  const getRefreshToken = useCallback(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('refresh_token') || sessionStorage.getItem('refresh_token');
     }
     return null;
-  };
+  }, []);
 
   // Store tokens
-  const storeTokens = (accessToken: string, refreshToken: string, rememberMe: boolean = false) => {
+  const storeTokens = useCallback((accessToken: string, refreshToken: string, rememberMe: boolean = false) => {
     if (typeof window !== 'undefined') {
       const storage = rememberMe ? localStorage : sessionStorage;
       storage.setItem('access_token', accessToken);
@@ -76,18 +78,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       otherStorage.removeItem('access_token');
       otherStorage.removeItem('refresh_token');
     }
-  };
+  }, []);
 
   // Determine active storage based on where the refresh token lives
-  const getActiveStorage = (): Storage | null => {
+  const getActiveStorage = useCallback((): Storage | null => {
     if (typeof window === 'undefined') return null;
     if (localStorage.getItem('refresh_token')) return localStorage;
     if (sessionStorage.getItem('refresh_token')) return sessionStorage;
     return localStorage; // default
-  };
+  }, []);
 
   // Persist and load user profile in storage to survive reloads/network hiccups
-  const storeUser = (userData: User) => {
+  const storeUser = useCallback((userData: User) => {
     if (typeof window !== 'undefined') {
       const storage = getActiveStorage();
       try {
@@ -96,9 +98,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.error('Failed to store user profile:', e);
       }
     }
-  };
+  }, [getActiveStorage]);
 
-  const getStoredUser = (): User | null => {
+  const getStoredUser = useCallback((): User | null => {
     if (typeof window === 'undefined') return null;
     const storage = getActiveStorage();
     const raw = storage?.getItem('user_profile');
@@ -109,20 +111,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
       console.error('Failed to parse stored user profile:', e);
       return null;
     }
-  };
+  }, [getActiveStorage]);
 
   // Clear tokens
-  const clearTokens = () => {
+  const clearTokens = useCallback(() => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
       sessionStorage.removeItem('access_token');
       sessionStorage.removeItem('refresh_token');
     }
-  };
+  }, []);
 
   // Refresh access token
-  const refreshAccessToken = async (): Promise<boolean> => {
+  const refreshAccessToken = useCallback(async (): Promise<boolean> => {
     const refreshToken = getRefreshToken();
     if (!refreshToken) return false;
 
@@ -152,10 +154,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setUser(null);
       return false;
     }
-  };
+  }, [clearTokens, getRefreshToken, storeTokens]);
 
   // Fetch user profile
-  const fetchUserProfile = async (): Promise<User | null> => {
+  const fetchUserProfile = useCallback(async (): Promise<User | null> => {
     const accessToken = getAccessToken();
     if (!accessToken) return null;
 
@@ -200,10 +202,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (cachedUser) return cachedUser;
       return null;
     }
-  };
+  }, [getAccessToken, getStoredUser, refreshAccessToken, storeUser]);
 
   // Login function
-  const login = async (
+  const login = useCallback(async (
     email: string,
     password: string,
     rememberMe: boolean = false
@@ -231,10 +233,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       console.error('Login error:', error);
       return { success: false, error: 'Network error occurred' };
     }
-  };
+  }, [storeTokens, storeUser]);
 
   // Logout function
-  const logout = async () => {
+  const logout = useCallback(async () => {
     const refreshToken = getRefreshToken();
     
     // Call logout API to blacklist the refresh token
@@ -256,16 +258,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     clearTokens();
     setUser(null);
     router.push('/login');
-  };
+  }, [clearTokens, getAccessToken, getRefreshToken, router]);
 
   // Refresh user data
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     const userData = await fetchUserProfile();
     setUser(userData);
-  };
+  }, [fetchUserProfile]);
 
   // Update profile
-  const updateProfile = async (data: Partial<User>): Promise<{ success: boolean; error?: string }> => {
+  const updateProfile = useCallback(async (data: Partial<User>): Promise<{ success: boolean; error?: string }> => {
     const accessToken = getAccessToken();
     if (!accessToken) return { success: false, error: 'Not authenticated' };
 
@@ -312,7 +314,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       console.error('Profile update error:', error);
       return { success: false, error: 'Network error occurred' };
     }
-  };
+  }, [getAccessToken, refreshAccessToken, storeUser]);
 
   // Initialize authentication state
   useEffect(() => {
@@ -336,9 +338,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
 
     initializeAuth();
-  }, []);
+  }, [fetchUserProfile, getAccessToken, getStoredUser]);
 
-  const value: AuthContextType = {
+  const value: AuthContextType = useMemo(() => ({
     user,
     isLoading,
     isAuthenticated,
@@ -346,7 +348,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     logout,
     refreshUser,
     updateProfile,
-  };
+  }), [isAuthenticated, isLoading, login, logout, refreshUser, updateProfile, user]);
 
   return (
     <AuthContext.Provider value={value}>

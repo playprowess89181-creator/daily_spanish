@@ -6,6 +6,7 @@ interface PaymentFiltersProps {
     status: string;
     planType: string;
     dateFrom: string;
+    dateTo: string;
   };
   onFilterChange: (filters: any) => void;
 }
@@ -15,25 +16,35 @@ export default function PaymentFilters({ filters, onFilterChange }: PaymentFilte
     onFilterChange({ [field]: value });
   };
 
-  const handleApplyFilters = () => {
-    // Apply filters logic here
-    console.log('Applying filters:', filters);
-  };
-
   const handleClearFilters = () => {
     onFilterChange({
       search: '',
       status: 'all',
       planType: 'all',
-      dateFrom: ''
+      dateFrom: '',
+      dateTo: ''
     });
   };
 
   return (
-    <div className="bg-white text-gray-900 shadow rounded-lg p-6 mb-6">
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        {/* Search Input */}
+    <div className="text-gray-900 p-6">
+      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
         <div>
+          <div className="text-sm text-gray-600">Filters</div>
+          <div className="text-base font-semibold text-gray-900">Search and narrow down results</div>
+        </div>
+        <button
+          type="button"
+          onClick={handleClearFilters}
+          className="px-4 py-2 rounded-xl bg-white/70 border border-white/30 shadow-sm text-gray-800 hover:bg-white self-start lg:self-auto"
+        >
+          <i className="fas fa-eraser mr-2"></i>
+          Clear
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+        <div className="xl:col-span-2">
           <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-2">
             Search
           </label>
@@ -47,12 +58,11 @@ export default function PaymentFilters({ filters, onFilterChange }: PaymentFilte
               value={filters.search}
               onChange={(e) => handleInputChange('search', e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-ultramarine focus:border-ultramarine"
-              placeholder="Search transactions..."
+              placeholder="Search by user name, email, or ID…"
             />
           </div>
         </div>
 
-        {/* Status Filter */}
         <div>
           <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-2">
             Status
@@ -67,11 +77,9 @@ export default function PaymentFilters({ filters, onFilterChange }: PaymentFilte
             <option value="active">Active</option>
             <option value="overdue">Overdue</option>
             <option value="cancelled">Cancelled</option>
-            <option value="refunded">Refunded</option>
           </select>
         </div>
 
-        {/* Plan Type Filter */}
         <div>
           <label htmlFor="planType" className="block text-sm font-medium text-gray-700 mb-2">
             Plan Type
@@ -84,16 +92,13 @@ export default function PaymentFilters({ filters, onFilterChange }: PaymentFilte
           >
             <option value="all">All Plans</option>
             <option value="monthly">Monthly</option>
-            <option value="quarterly">Quarterly</option>
-            <option value="annual">Annual</option>
-            <option value="lifetime">Lifetime</option>
+            <option value="yearly">Annual</option>
           </select>
         </div>
 
-        {/* Date Range */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Date Range
+            Joined From
           </label>
           <input
             type="date"
@@ -102,18 +107,19 @@ export default function PaymentFilters({ filters, onFilterChange }: PaymentFilte
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-ultramarine focus:border-ultramarine"
           />
         </div>
-      </div>
 
-        {/* Apply Filters Button */}
-        <div className="flex items-end">
-          <button
-            onClick={handleApplyFilters}
-            className="w-full bg-ultramarine text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
-          >
-            <i className="fas fa-filter mr-2"></i>
-            Apply Filters
-          </button>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Joined To
+          </label>
+          <input
+            type="date"
+            value={filters.dateTo}
+            onChange={(e) => handleInputChange('dateTo', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-ultramarine focus:border-ultramarine"
+          />
         </div>
+      </div>
     </div>
   );
 }
